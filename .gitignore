@@ -1,0 +1,33 @@
+omnivla-finetuned-cast/
+omnivla-original/
+omnivla-original-balance/
+MBRA/
+MBRA_BDD/
+OmniVLA.egg-info/
+prismatic/vla/datasets/sampler/
+prismatic/vla/datasets/bdd_dataset_.py
+prismatic/vla/datasets/cast_dataset_.py
+prismatic/vla/datasets/lelan_dataset_.py
+prismatic/vla/datasets/gnm_dataset_.py
+prismatic/vla/datasets/frodobots_dataset_.py
+vla-scripts/train_omnivla_dataset_.py
+vla-scripts/train_omnivla_dataset__.py
+vla-scripts/finetune_nav_MMN_dataset_cast2.py
+config_nav/mbra_and_dataset_config_.yaml
+config_nav/mbra_and_dataset_config__.yaml
+config_nav/mbra_and_dataset_config_bellman.yaml
+config_nav/base_server_bellman.yaml
+visualization/
+runs/
+# Ignore all __pycache__ directories everywhere
+**/__pycache__/
+# Ignore all wandb directories everywhere
+**/wandb/
+transformers-openvla-oft
+# 添加Omnivla/test/qkv_language_only
+OmniVLA/test/qkv_language_only/
+transformers-openvla-oft/
+*.npy
+*.npy
+
+
