@@ -222,11 +222,12 @@ class PrismaticVisionBackbone(nn.Module):
                 # Get patches from both SigLIP and DINOv2 vision transformers
                 patches = self.featurizer(img_regular)
                 patches_fused = self.fused_featurizer(img_fused)
-
+                # 分别查看两个特征的形状
+                # print(f" Obtained patches shapes: patches={patches.shape}, patches_fused={patches_fused.shape}")
                 # Concatenate SigLIP and DINOv2 patches along the hidden dimension
                 combined_patches = torch.cat([patches, patches_fused], dim=2)
+                # print(f" Combined patches shape: {combined_patches.shape}")
                 all_patches.append(combined_patches)
-
             # Concatenate all patches along the patch dimension
             return torch.cat(all_patches, dim=1)
 
@@ -882,6 +883,12 @@ class PrismaticForConditionalGeneration_MMNv1(PrismaticPreTrainedModel):
         else:
             patch_features = self.vision_backbone(pixel_values)  # (bsz, 256 * num_images, D)
 
+        # 打印视觉 Backbone 输出的 patch 特征形状
+        # print(f"视觉 Backbone 输出 patch_features 形状: {patch_features.shape}")  # 添加此行
+        # 如果我传入vggt生成的图像特征，就应该是对应patch_features。
+        projected_features = self.projector(patch_features)
+        # 打印投影器输出形状
+        # print(f"投影器输出 projected_features 形状: {projected_features.shape}")  # 你要添加的打印位置
         # Project patch embeddings into language embedding space
         #print("before projection", patch_features.size())
         return self.projector(patch_features)
@@ -1096,6 +1103,11 @@ class PrismaticForConditionalGeneration_MMNv1(PrismaticPreTrainedModel):
         # === Handle Multimodal Forward ===
         elif (input_ids.shape[0] == pixel_values.shape[0]) or (inputs_embeds.shape[0] == pixel_values.shape[0]):
             assert past_key_values is None, "Unexpected key `past_key_values` provided during multimodal forward!"
+            
+            # print("进入MMNv1 forward")  
+            # 打印原始图像输入形状
+            # print(f"原始图像 pixel_values 形状: {pixel_values.shape}")  # 添加此行
+
             # Get input embeddings (from language model embeddings)
             input_embeddings = self.get_input_embeddings()(input_ids)  # (B, seq_len, D)
             all_actions_mask = self._process_action_masks(labels)
