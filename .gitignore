@@ -26,8 +26,6 @@ runs/
 transformers-openvla-oft
 # 添加Omnivla/test/qkv_language_only
 OmniVLA/test/qkv_language_only/
-transformers-openvla-oft/
-*.npy
 *.npy
 
 
