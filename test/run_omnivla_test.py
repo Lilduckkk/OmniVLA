@@ -514,7 +514,7 @@ class Inference:  # 定义推理流程封装类
                     modality_id=modality_id.to(torch.bfloat16).to(device_id),  # 模态 id
                     labels=batch["labels"].to(device_id),  # 标签（可计算loss）
                     output_hidden_states=True,  # 输出隐藏状态
-                    output_attentions=True,  # 新增：启用注意力权重输出
+                    # output_attentions=True,  # 新增：启用注意力权重输出 开启后导致输出不一样，不要开！！！！！！
                     proprio=batch["goal_pose"].to(torch.bfloat16).to(device_id),  # 本体输入（目标位姿）
                     proprio_projector=pose_projector,  # 本体投影器
                     noisy_actions=noisy_actions if use_diffusion else None,  # 扩散噪声动作（未用）
