@@ -49,6 +49,7 @@ janus_src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../
 sys.path.insert(0, janus_src_path)
 from JanusVLN.src.qwen_vl.model.vggt.models.vggt import VGGT
 from JanusVLN.src.qwen_vl.model.vggt.utils.load_fn import load_and_preprocess_images
+import OmniVLA.test.VGGTv2 as VGGTv2
 
 import random
 import glob
@@ -116,6 +117,7 @@ class Inference:
         self.count_id = 0
         self.linear, self.angular = 0.0, 0.0
         self.datastore_path_image = save_dir
+        self.vggt_feature = None
     # ----------------------------
     # Static Utility Methods
     # ----------------------------
@@ -473,6 +475,7 @@ class Inference:
                 noisy_action_projector=noisy_action_projector if use_diffusion else None,
                 diffusion_timestep_embeddings=diffusion_timestep_embeddings if use_diffusion else None,
                 use_film=use_film,
+                vggt_feature=self.vggt_feature,
             )
 
         # Prepare data for metrics
@@ -600,7 +603,7 @@ def define_model(cfg: InferenceConfig) -> None:
 
     return vla, action_head, pose_projector, device_id, NUM_PATCHES, action_tokenizer, processor
 
-
+# ====================================== VGGT ======================================
 # 新增
 def parse_args():
     parser = argparse.ArgumentParser(description="VGGT with Text-Image Matching")
@@ -819,7 +822,7 @@ def run_text_image_matching_pipeline(args, model, device, dtype):
     print("\n" + "="*80)
     print(f"🔍 提取 {num_images} 张图像的KV特征")
     print("="*80)
-    _, past_kv = test_kv_cache_with_real_images(model, images, dtype, device)
+    _, past_kv, _ = test_kv_cache_with_real_images(model, images, dtype, device)
     
     # 过滤空缓存层
     valid_past_kv = [(k, v) for k, v in past_kv if k is not None and v is not None]
@@ -982,7 +985,8 @@ def demo_fn_new(args):
     print(f"PyTorch 总占用（含缓存）: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
 
     # 获取当前图像特征
-    get_current_image_feature(args, model, device, dtype)
+    feature = get_current_image_feature(args, model, device, dtype)
+    print("当前图像特征 shape:", feature.shape)
     print(f"PyTorch 总占用（含缓存）: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
 
     # 清理显存
@@ -991,15 +995,34 @@ def demo_fn_new(args):
     print("✅ 所有流程完成!")
     print("="*80)
 
-    return True
+    # return True
+    return feature
 # ===============================================================
 # Main Entry
 # ===============================================================
 if __name__ == "__main__":
     # 新增
-    # args = parse_args()
-    # with torch.no_grad():
-    #     demo_fn_new(args)
+    args = parse_args()
+    with torch.no_grad():
+        vggt_feature = demo_fn_new(args)
+        print("提取的当前图像特征:", vggt_feature.shape)
+
+
+
+    print("原始 VGG-T 特征:", vggt_feature.shape)  # [1, 1369, 2048]
+
+    # 初始化 VGGTMerger
+    merger = VGGTv2.VGGTMerger(
+        output_dim=4096,
+        hidden_dim=4096,
+        context_dim=2048,
+        spatial_merge_size=2
+    ).to(vggt_feature.device)
+
+    # 获取 image_embeds_3d
+    image_embeds_3d = merger(vggt_feature)
+
+    print("最终 image_embeds_3d:", image_embeds_3d.shape)  # [1, 361, 4096]
 
 
     # select modality
@@ -1014,7 +1037,7 @@ if __name__ == "__main__":
     # lan_inst_prompt = "move toward black tv monitor"
     lan_inst_prompt = "move toward white office cabinet"
     # lan_inst_prompt = "turn right and move forward"
-
+    # lan_inst_prompt = "turn right"
     goal_lat, goal_lon, goal_compass = 37.8738930785863, -122.26746181032362, 0.0
     goal_utm = utm.from_latlon(goal_lat, goal_lon)
     goal_compass = -float(goal_compass) / 180.0 * math.pi
@@ -1034,6 +1057,7 @@ if __name__ == "__main__":
         action_tokenizer=action_tokenizer,
         processor=processor,
     )
+    inference.vggt_feature = image_embeds_3d.to(device_id)
     inference.run()
     print(f"PyTorch 总占用（含缓存）: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
     # 睡眠5秒以确保所有输出完成

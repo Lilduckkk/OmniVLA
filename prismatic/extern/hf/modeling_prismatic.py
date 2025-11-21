@@ -199,7 +199,7 @@ class PrismaticVisionBackbone(nn.Module):
         """
         if self.num_images_in_input == 1:
             if not self.use_fused_vision_backbone:
-                return self.featurizer(pixel_values)
+                return self.featurizer(pixel_values) # SigLIP only
 
             # Split `pixel_values :: [bsz, 2 * 3, resolution, resolution]` =>> featurize =>> channel stack
             img, img_fused = torch.split(pixel_values, [3, 3], dim=1)
@@ -211,7 +211,7 @@ class PrismaticVisionBackbone(nn.Module):
             assert self.use_fused_vision_backbone, "Multi-image inputs require using fused backbone!"
 
             # Split `pixel_values` into individual images (each with 6 channels: 3 for SigLIP + 3 for DINOv2)
-            images = torch.split(pixel_values, [6] * self.num_images_in_input, dim=1)
+            images = torch.split(pixel_values, [6] * self.num_images_in_input, dim=1) # 拆分后恢复为pixel_values_stacked + pixel_values_goal_stacked
 
             # Process each image and collect patches
             all_patches = []
@@ -220,8 +220,8 @@ class PrismaticVisionBackbone(nn.Module):
                 img_regular, img_fused = torch.split(img, [3, 3], dim=1)
 
                 # Get patches from both SigLIP and DINOv2 vision transformers
-                patches = self.featurizer(img_regular)
-                patches_fused = self.fused_featurizer(img_fused)
+                patches = self.featurizer(img_regular) # SigLIP
+                patches_fused = self.fused_featurizer(img_fused) # DINOv2
                 # 分别查看两个特征的形状
                 # print(f" Obtained patches shapes: patches={patches.shape}, patches_fused={patches_fused.shape}")
                 # Concatenate SigLIP and DINOv2 patches along the hidden dimension
@@ -1405,7 +1405,7 @@ class PrismaticForConditionalGeneration_MMNv2(PrismaticPreTrainedModel):
             patch_features = self.vision_backbone(pixel_values)  # (bsz, 256 * num_images, D)
 
         # 打印视觉 Backbone 输出的 patch 特征形状
-        # print(f"视觉 Backbone 输出 patch_features 形状: {patch_features.shape}")  # 添加此行
+        print(f"视觉 Backbone 输出 patch_features 形状: {patch_features.shape}")  # 添加此行
         # 如果我传入vggt生成的图像特征，就应该是对应projected_features。
         projected_features = self.projector(patch_features)
         # 打印投影器输出形状
@@ -1574,6 +1574,7 @@ class PrismaticForConditionalGeneration_MMNv2(PrismaticPreTrainedModel):
         noisy_action_projector=None,
         diffusion_timestep_embeddings=None,
         use_film: bool = False,
+        vggt_feature=None,
     ) -> Union[Tuple, PrismaticCausalLMOutputWithPast]:
         """Run a forward pass through the VLM, returning a PrismaticCausalLMOutputWithPast instance."""
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -1630,10 +1631,11 @@ class PrismaticForConditionalGeneration_MMNv2(PrismaticPreTrainedModel):
         # === Handle Multimodal Forward ===
         elif (input_ids.shape[0] == pixel_values.shape[0]) or (inputs_embeds.shape[0] == pixel_values.shape[0]):
             assert past_key_values is None, "Unexpected key `past_key_values` provided during multimodal forward!"
-            
-            # print("进入MMNv1 forward")  
+
+            print("\n===== 开始 MMNv2 forward 前向推理 =====")
+            # print("进入MMNv2 forward")  
             # 打印原始图像输入形状
-            # print(f"原始图像 pixel_values 形状: {pixel_values.shape}")  # 添加此行
+            print(f"原始图像 pixel_values 形状: {pixel_values.shape}")  # 添加此行
 
             # Get input embeddings (from language model embeddings)
             input_embeddings = self.get_input_embeddings()(input_ids)  # (B, seq_len, D)
@@ -1645,7 +1647,19 @@ class PrismaticForConditionalGeneration_MMNv2(PrismaticPreTrainedModel):
 
             # Get visual features
             projected_patch_embeddings = self._process_vision_features(pixel_values, language_embeddings, use_film)
-            # print(f"投影器输出 projected_patch_embeddings 形状: {projected_patch_embeddings.shape}")  # 你要添加的打印位置
+            print(f"投影器输出 projected_patch_embeddings 形状: {projected_patch_embeddings.shape}")  # 你要添加的打印位置
+
+            # ====================== 添加VGGT特征 =====================
+            # 将vggt_feature拼接到projected_patch_embeddings中间
+            if vggt_feature is not None:
+                projected_patch_embeddings = torch.cat(
+                    (projected_patch_embeddings[:, :projected_patch_embeddings.shape[1]//2, :],
+                     vggt_feature,
+                     projected_patch_embeddings[:, projected_patch_embeddings.shape[1]//2:, :]),
+                    dim=1
+                )
+            # ====================== 添加VGGT特征 =====================
+            
             # Add proprioceptive state if provided
             projected_patch_embeddings = self._process_proprio_features(
                 projected_patch_embeddings, proprio, proprio_projector
