@@ -27,5 +27,8 @@ transformers-openvla-oft
 # 添加Omnivla/test/qkv_language_only
 OmniVLA/test/qkv_language_only/
 *.npy
+# VS Code 配置文件（新增这行）
+.vscode/
+
 
 
