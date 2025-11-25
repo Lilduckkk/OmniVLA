@@ -1007,10 +1007,6 @@ if __name__ == "__main__":
         vggt_feature = demo_fn_new(args)
         print("提取的当前图像特征:", vggt_feature.shape)
 
-
-
-    print("原始 VGG-T 特征:", vggt_feature.shape)  # [1, 1369, 2048]
-
     # 初始化 VGGTMerger
     merger = VGGTv2.VGGTMerger(
         output_dim=4096,
@@ -1021,7 +1017,6 @@ if __name__ == "__main__":
 
     # 获取 image_embeds_3d
     image_embeds_3d = merger(vggt_feature)
-
     print("最终 image_embeds_3d:", image_embeds_3d.shape)  # [1, 361, 4096]
 
 
