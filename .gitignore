@@ -29,6 +29,11 @@ OmniVLA/test/qkv_language_only/
 *.npy
 # VS Code 配置文件（新增这行）
 .vscode/
-
-
+data/
+vla-scripts/load_data_dummy.py
+vla-scripts/load_data_new.py
+vla-scripts/load_data.py
+vla-scripts/train_omnivla_wy.py
+prismatic/vla/datasets/navitrace_dataset.py
+prismatic/vla/datasets/navitrace_new_dataset.py
 

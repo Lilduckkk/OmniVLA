@@ -29,12 +29,12 @@ from prismatic.models.backbones.vision import ImageTransform
 from PIL import Image
 from typing import Union
 
-from vint_train.data.data_utils import (
-    img_path_to_data,
-    calculate_sin_cos,
-    get_data_path,
-    to_local_coords,
-)
+# from vint_train.data.data_utils import (
+#     img_path_to_data,
+#     calculate_sin_cos,
+#     get_data_path,
+#     to_local_coords,
+# )
 
 class Dummy_Dataset(Dataset):
     def __init__(
@@ -79,7 +79,8 @@ class Dummy_Dataset(Dataset):
         
         inst_obj = "move toward blue trash bin"
         actions = np.random.rand(8, 4) #dummy action
-        
+        # print(f"dummy action: {actions}")
+        # print(f"Dummy actions: {type(actions)}, shape: {actions.shape}")
         # Dummy current and goal location
         current_lat, current_lon, current_compass = 37.87371258374039, -122.26729417226024, 270.0
         cur_utm = utm.from_latlon(current_lat, current_lon)

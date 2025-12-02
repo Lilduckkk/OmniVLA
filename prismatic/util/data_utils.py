@@ -127,6 +127,11 @@ class PaddedCollatorForActionPrediction_Nav_MMN:
         actions = [torch.from_numpy(np.copy(instance["actions"])) for instance in instances]
         actions = torch.stack(actions)
 
+        # Stack original_normalized_trajectory (新增!)
+        original_normalized_trajectory = [instance["original_normalized_trajectory"] for instance in instances]
+        # 注意：在 WY_Dataset 中，您已经将其转换为 torch.as_tensor，所以这里可以直接 stack
+        original_normalized_trajectory = torch.stack(original_normalized_trajectory)
+
         # Stack actin mask
         action_select_mask = [torch.from_numpy(np.copy(instance["action_select_mask"])) for instance in instances]
         action_select_mask = torch.stack(action_select_mask)
@@ -167,6 +172,8 @@ class PaddedCollatorForActionPrediction_Nav_MMN:
             labels=labels,
             modality_id = [instance["modality_id"] for instance in instances],
             actions=actions,
+            # 添加 original_normalized_trajectory 到输出字典中 (新增!)
+            original_normalized_trajectory=original_normalized_trajectory,
             action_select_mask=action_select_mask,
             goal_pose=goal_pose,
             obj_pose_norm=obj_pose_norm,
