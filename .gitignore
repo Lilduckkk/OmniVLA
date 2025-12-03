@@ -37,3 +37,4 @@ vla-scripts/train_omnivla_wy.py
 prismatic/vla/datasets/navitrace_dataset.py
 prismatic/vla/datasets/navitrace_new_dataset.py
 
+*.arrow

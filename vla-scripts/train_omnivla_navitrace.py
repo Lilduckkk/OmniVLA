@@ -8,8 +8,13 @@ Train or finetune OmniVLA with LoRA.
 # Configuration Flags
 # ==============================
 TRAIN_MODE = False   # True: training mode, False: debug mode (minimize GPU RAM usage)
-VISUALIZE = False    # True: save visualization images of policy performance
-
+VISUALIZE = True    # True: save visualization images of policy performance
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+import warnings
+warnings.filterwarnings("ignore")
 # ==============================
 # Path Setup
 # ==============================
@@ -55,6 +60,7 @@ torch.set_num_threads(60)
 # Third-Party Libraries
 # ==============================
 import tqdm
+import wandb
 import draccus
 from accelerate import PartialState
 from huggingface_hub import HfApi, snapshot_download
@@ -98,7 +104,7 @@ from prismatic.vla.action_tokenizer import ActionTokenizer
 from prismatic.vla.constants import ACTION_DIM, NUM_ACTIONS_CHUNK, POSE_DIM, IGNORE_INDEX
 from prismatic.vla.datasets import RLDSBatchTransform, RLDSDataset
 from prismatic.vla.datasets.dummy_dataset import Dummy_Dataset
-from prismatic.vla.datasets.wy_dataset import WY_Dataset
+from prismatic.vla.datasets.wy_dataset import Navitrace_Dataset
 from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
 
 # ==============================
@@ -131,9 +137,9 @@ class OmniVLAConfig:
     grad_accumulation_steps: int = 1                 # Number of gradient accumulation steps
     max_steps: int = 200_000                         # Max number of training steps
     max_steps: int = 20                              # 减小一点便于测试
-    save_freq: int = 10                              # Checkpoint saving frequency in steps    
+    save_freq: int = 100                              # Checkpoint saving frequency in steps    
     save_latest_checkpoint_only: bool = False        # If True, saves only 1 checkpoint, overwriting latest checkpoint
-                                                     #   (If False, saves all checkpoints)
+                                                     # (If False, saves all checkpoints)
     image_aug: bool = True                           # If True, trains with image augmentations (HIGHLY RECOMMENDED)
 
     # LoRA
@@ -146,11 +152,15 @@ class OmniVLAConfig:
 
     merge_lora_during_training: bool = False          # If True, merges LoRA weights and saves result during training
 
-    # Logging configuration removed (WandB)
+    # Logging configuration removed 
+    wandb_entity: str = "lilduck-southern-university-of-science-and-technology"          # Name of WandB entity
+    wandb_project: str = "omnivla-navitrace"         # Name of WandB project
     run_id_note: Optional[str] = None                # Extra note to add to end of run ID for logging
     run_id_override: Optional[str] = None            # Optional string to override the run ID with
-    log_freq: int = 10                               # Logging frequency in steps (renamed from wandb_log_freq)
+    wandb_log_freq: int = 10                         # Logging frequency in steps (renamed from wandb_log_freq)
 
+    # Dataset
+    dataset_root: str = "data/data_splits/navitrace_dataset" # Path to data root
 def remove_ddp_in_checkpoint(state_dict) -> dict:
     new_state_dict = {}
     for k, v in state_dict.items():
@@ -244,7 +254,11 @@ def run_forward_pass(
     # Get ground-truth action labels    
     ground_truth_actions = batch["actions"].to(device_id).to(torch.bfloat16)
     modality_id = batch["goal_mask_select"]
-        
+    
+    segmentation_mask = batch["segmentation_mask"].to(device_id).to(torch.bfloat16)  # (B, H, W)
+    # print(f"segmentation_mask shape: {segmentation_mask.shape}")
+    origin_trajectory = batch["original_normalized_trajectory"].to(device_id).to(torch.bfloat16)  # (B, num_points, Action_Dim)
+    # print(f"origin_trajectory shape: {origin_trajectory}")
     # OmniVLA forward pass    
     if TRAIN_MODE:
         with torch.autocast("cuda", dtype=torch.bfloat16):    
@@ -340,7 +354,7 @@ def run_forward_pass(
         )
 
         if VISUALIZE == True:
-            visualize_train(
+            visualize_train_new(
                 batch["img_PIL"],
                 batch["gimg_PIL"],              
                 obj_pose_norm.detach().cpu(),   
@@ -380,6 +394,29 @@ def compute_smoothened_metrics(metrics_deques) -> dict:
                 smoothened_metrics[name] = sum(valid_values) / len(valid_values)
             
     return smoothened_metrics
+
+def log_metrics_to_wandb(metrics, prefix, step, wandb_entity) -> None:
+    """
+    Log metrics to Weights & Biases.
+
+    Args:
+        metrics (dict): Dictionary of metrics to log
+        prefix (str): Prefix for metric names
+        step (int): Training step
+        wandb_entity (str): W&B entity instance
+
+    Returns:
+        None.
+    """
+    log_dict = {}
+    for name, value in metrics.items():
+        # Map loss_value to Loss for better readability in W&B
+        if name == "loss_value":
+            log_dict[f"{prefix}/Loss"] = value
+        # Keep other metrics as is
+        else:
+            log_dict[f"{prefix}/{name.replace('_', ' ').title()}"] = value
+    wandb_entity.log(log_dict, step=step)
 
 def save_training_checkpoint(
     cfg,
@@ -449,9 +486,9 @@ def visualize_train(
     batch_goal_PIL: torch.Tensor,  
     goal_pos_lan: torch.Tensor, 
     goal_pos: torch.Tensor, 
-    traj_raw: torch.Tensor,
-    est_traj: torch.Tensor,
-    select_traj: torch.Tensor,    
+    traj_raw: torch.Tensor, # 真实标签
+    est_traj: torch.Tensor, # 生成的轨迹
+    select_traj: torch.Tensor, # 也是真实标签，一样   
     goal_mask_select: torch.Tensor,
     eval_type: str,    
     epoch: int,
@@ -526,6 +563,93 @@ def visualize_train(
         plt.savefig(save_path)
         plt.close(fig)
 
+def visualize_train_new(
+    batch_current_PIL,  # 注意：这里实际上是 List[PIL.Image]，不再是 Tensor
+    batch_goal_PIL,  
+    goal_pos_lan: torch.Tensor, 
+    goal_pos: torch.Tensor, 
+    traj_raw: torch.Tensor, 
+    est_traj: torch.Tensor, 
+    select_traj: torch.Tensor,    
+    goal_mask_select: torch.Tensor,
+    eval_type: str,    
+    epoch: int,
+    count: int,
+    num_images_log: int = 10,            
+    lan: bool = True,    
+):
+    """Plot samples from the exploration model overlaid on the image."""
+    project_folder = "./visualization"
+    visualize_path = os.path.join(
+        project_folder,
+        eval_type,
+        f"epoch{epoch}",
+        "action_sampling_prediction",
+    )        
+    
+    if not os.path.isdir(visualize_path):
+        os.makedirs(visualize_path)
+
+    wandb_list = []
+    for i in range(num_images_log):
+        fig, ax = plt.subplots(figsize=(10, 8), dpi=80)
+        
+        # --- 1. 处理图像背景 (修正部分) ---
+        # 错误原因：batch_current_PIL[i] 是 PIL Image 对象，不是 Tensor
+        # 修正：直接获取 PIL 对象并转为 numpy 数组
+        
+        img_pil = batch_current_PIL[i] 
+        img_np = np.array(img_pil)  # PIL Image 直接转 numpy (H, W, C)
+        
+        # 获取图像实际尺寸
+        H, W = img_np.shape[:2]
+        
+        # 绘制背景图 (imshow 默认原点在左上角)
+        ax.imshow(img_np)
+
+        # --- 2. 处理轨迹数据 ---
+        # A. 真实轨迹 (traj_raw) - 映射到像素坐标
+        # 假设数据是归一化的(0-1)，直接乘以 W 和 H
+        x_raw = traj_raw[i, :, 0].detach().cpu().float().numpy() * W
+        y_raw = traj_raw[i, :, 1].detach().cpu().float().numpy() * H
+
+        # B. 生成轨迹 (est_traj) - 映射到像素坐标
+        x_est = est_traj[i, :, 0].detach().cpu().float().numpy() * W
+        y_est = est_traj[i, :, 1].detach().cpu().float().numpy() * H
+
+        # (可选) 将真实轨迹起点插入到生成轨迹开头，防止生成轨迹“悬空”
+        if len(x_raw) > 0:
+            start_x = x_raw[0]
+            start_y = y_raw[0]
+            x_est = np.insert(x_est, 0, start_x)
+            y_est = np.insert(y_est, 0, start_y)
+
+        # --- 3. 绘制轨迹 ---
+        # imshow 坐标系下，Y轴向下为正，直接 plot 即可
+        ax.plot(x_raw, y_raw, marker='o', color='lime', 
+                linewidth=3, markersize=8, label="Ground Truth")  # 真实轨迹 -> Ground Truth
+        
+        # ax.plot(x_est, y_est, marker='^', color='orange', 
+        #         linewidth=3, markersize=8, label="Predicted")     # 生成轨迹 -> Predicted
+
+        # 基础配置
+        ax.legend(loc='upper right', fontsize=12)
+        # 修改这里：标题改成英文
+        ax.set_title(f"Sample {i}: Trajectory Overlay", fontsize=16, fontweight='bold')
+        ax.axis('off') # 隐藏坐标轴
+
+        # --- 4. 关键修正：先保存，再引用 ---
+        save_path = os.path.join(visualize_path, f"sample_{count}_{i}.png")
+        
+        # ⬇️ 修正点 A: 必须先保存文件到磁盘
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=100, bbox_inches='tight', pad_inches=0.1)
+        
+        # ⬇️ 修正点 B: 文件存在后，再将其添加到 wandb 列表中
+        wandb_list.append(wandb.Image(save_path)) 
+        
+        plt.close(fig)
+
 def merge_batches_padding(batch_list, pad_token_id, IGNORE_INDEX, model_max_length):
     """
     Merge a list of dictionary batches into a single dictionary,
@@ -598,7 +722,7 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     run_id = get_run_id(cfg)
 
     # Create experiment run directory
-    run_dir = cfg.run_root_dir / run_id
+    run_dir = cfg.run_root_dir / run_id # runs/omnivla-original
     os.makedirs(run_dir, exist_ok=True)
     print("run_dir", run_dir, run_id)
         
@@ -609,7 +733,11 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     torch.cuda.set_device(device_id)
     torch.cuda.empty_cache()
     print("World size", world_size, "rank", device_id)
-    
+
+    # Initialize wandb logging
+    if distributed_state.is_main_process:
+        wandb.init(entity=cfg.wandb_entity, project=cfg.wandb_project, name=f"ft+{run_id}")
+
     # MBRA loading removed.
 
     # Print detected constants
@@ -679,11 +807,11 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
             low_cpu_mem_usage=True,
         ).to(device_id) #            trust_remote_code=True,
     
-    print("vla class", type(vla))
+    print("vla class", type(vla)) # 实际是OpenVLAForActionPrediction_MMNv1
     print("llm class", type(vla.language_model))
 
     # Set number of images in VLA input
-    print("cfg.num_images_in_input", cfg.num_images_in_input)
+    print("cfg.num_images_in_input", cfg.num_images_in_input) # 2
     vla.vision_backbone.set_num_images_in_input(cfg.num_images_in_input)
     vla.to(dtype=torch.bfloat16, device=device_id)
 
@@ -729,9 +857,9 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     )
 
     # Get number of vision patches
-    NUM_PATCHES = vla.module.vision_backbone.get_num_patches() * vla.module.vision_backbone.get_num_images_in_input()
+    NUM_PATCHES = vla.module.vision_backbone.get_num_patches() * vla.module.vision_backbone.get_num_images_in_input() # 256 * 2 = 512
     # For goal pose conditioning
-    NUM_PATCHES += 1
+    NUM_PATCHES += 1 # 513
 
     if not TRAIN_MODE:
         for param in vla.parameters():
@@ -743,10 +871,10 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     print(f"# total trainable params: {sum(p.numel() for p in trainable_params)}")
     optimizer = AdamW(trainable_params, lr=cfg.learning_rate)
 
-    # Record original learning rate
+    # Record original learning rate 记录原始学习率
     original_lr = optimizer.param_groups[0]["lr"]
 
-    # Create learning rate scheduler
+    # Create learning rate scheduler 创建学习率调度器
     scheduler = MultiStepLR(
         optimizer,
         milestones=[cfg.num_steps_before_decay],  # Number of steps after which LR will change
@@ -767,60 +895,51 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     )
 
     #Data loader and sampler setting (I provide the sample dataloader. Please replace this dataloader with your dataset. Following sample code, you can combine the mutiple datasets.)        
-    train_dataset_dummy = []
-    test_dataset_dummy = []
-    DATA_ROOT = "data/data_splits/navitrace_dataset"    
+    train_dataset_navitrace = []
+    test_dataset_navitrace = []
     for data_split_type in ["train", "test"]:   
-        #dummy dataset
-        # dataset_dummy = Dummy_Dataset(   
-        #     context_size = 5, # Removed MBRA config dep        
-        #     action_tokenizer=action_tokenizer,
-        #     base_tokenizer=processor.tokenizer, 
-        #     image_transform=processor.image_processor.apply_transform,
-        #     prompt_builder_fn=PurePromptBuilder,                                                                         
-        # ) 
-        dataset_dummy = WY_Dataset(
+        dataset_navitrace = Navitrace_Dataset(
             action_tokenizer=action_tokenizer,
             base_tokenizer=processor.tokenizer, 
             image_transform=processor.image_processor.apply_transform,
             prompt_builder_fn=PurePromptBuilder,
             dataset_name="navitrace",
-            data_root_dir=DATA_ROOT,
+            data_root_dir=cfg.dataset_root,
             data_split_type=data_split_type,
             predict_stop_token=True,
         )
         if data_split_type == "train":
-            train_dataset_dummy.append(dataset_dummy)
+            train_dataset_navitrace.append(dataset_navitrace)
         elif data_split_type == "test":
-            test_dataset_dummy.append(dataset_dummy)
+            test_dataset_navitrace.append(dataset_navitrace)
                     
         if data_split_type == "train":                   
-            train_dataset_dummy = ConcatDataset(train_dataset_dummy)
-            sampler_train_dummy = DistributedSampler(train_dataset_dummy, num_replicas=world_size, rank=device_id, shuffle=True) 
+            train_dataset_navitrace = ConcatDataset(train_dataset_navitrace)
+            sampler_train_navitrace = DistributedSampler(train_dataset_navitrace, num_replicas=world_size, rank=device_id, shuffle=True) 
                 
-            train_loader_dummy = DataLoader(
-                train_dataset_dummy,
+            train_loader_navitrace = DataLoader(
+                train_dataset_navitrace,
                 batch_size=cfg.batch_size,
                 shuffle=False,
                 collate_fn=collator,
                 num_workers=8,
                 drop_last=True,
                 persistent_workers=True,
-                sampler=sampler_train_dummy,
+                sampler=sampler_train_navitrace,
             )                  
         else:
-            test_dataset_dummy = ConcatDataset(test_dataset_dummy) 
-            sampler_test_dummy = DistributedSampler(test_dataset_dummy, num_replicas=world_size, rank=device_id, shuffle=True)                 
+            test_dataset_navitrace = ConcatDataset(test_dataset_navitrace) 
+            sampler_test_navitrace = DistributedSampler(test_dataset_navitrace, num_replicas=world_size, rank=device_id, shuffle=True)                 
 
-            test_loader_dummy = DataLoader(
-                test_dataset_dummy,
+            test_loader_navitrace = DataLoader(
+                test_dataset_navitrace,
                 batch_size=cfg.batch_size,
                 shuffle=False,
                 collate_fn=collator,
                 num_workers=8,
                 drop_last=True,
                 persistent_workers=True,
-                sampler=sampler_test_dummy,
+                sampler=sampler_test_navitrace,
             )
 
     # Deque to store recent train metrics (used for computing smoothened metrics for gradient accumulation)
@@ -841,13 +960,13 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     }
 
     # 1. 初始化单个迭代器
-    train_iterator = iter(train_loader_dummy)
+    train_iterator = iter(train_loader_navitrace)
                  
     log_count = 0
     # for epoch in range(100):
     for epoch in range(1):
         # 只需要设置这一个 sampler
-        sampler_train_dummy.set_epoch(epoch)
+        sampler_train_navitrace.set_epoch(epoch)
                 
         with tqdm.tqdm(total=cfg.max_steps, leave=False) as progress:
             if TRAIN_MODE:
@@ -867,7 +986,7 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                 try:
                     batch = next(train_iterator)
                 except StopIteration:
-                    train_iterator = iter(train_loader_dummy)
+                    train_iterator = iter(train_loader_navitrace)
                     batch = next(train_iterator)
                 # # 打印所有键（简洁列表）
                 # all_keys = list(batch.keys())
@@ -900,7 +1019,7 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                 )
                 # Normalize loss to account for gradient accumulation
                 normalized_loss = loss / cfg.grad_accumulation_steps
-
+                # print(f"Epoch {epoch} | Batch {batch_idx} | Loss: {loss.item():.4f}")
                 # Backward pass
                 if TRAIN_MODE:
                     normalized_loss.backward()
@@ -913,18 +1032,30 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                 # Compute gradient step index
                 gradient_step_idx = log_count // cfg.grad_accumulation_steps
                 log_count += 1
-
-                # WandB logging removed
-                # !!! 请在这里添加这行代码 !!!
-                # 计算当前的总步数（如果是断点续训，需要加上之前的步数）
+                # print("Gradient Step Index:", gradient_step_idx)
+                # print(f"log_count: {log_count}")
+                # Push Metrics to W&B (every wandb_log_freq gradient steps)
                 log_step = gradient_step_idx if not cfg.resume else cfg.resume_step + gradient_step_idx
-                
+                # print("Log Step:", log_step)
+                smoothened_metrics = compute_smoothened_metrics(recent_metrics)
+                if distributed_state.is_main_process and log_step % cfg.wandb_log_freq == 0:
+                    log_metrics_to_wandb(smoothened_metrics, "VLA Train", log_step, wandb)
                 # [If applicable] Linearly warm up learning rate from 10% to 100% of original
                 if cfg.lr_warmup_steps > 0:
                     lr_progress = min((gradient_step_idx + 1) / cfg.lr_warmup_steps, 1.0)  # Cap at 1.0
                     current_lr = original_lr * (0.1 + 0.9 * lr_progress)
                     for param_group in optimizer.param_groups:
                         param_group["lr"] = current_lr
+
+                if distributed_state.is_main_process and gradient_step_idx % cfg.wandb_log_freq == 0:
+                    # Log the learning rate
+                    # Make sure to do this AFTER any learning rate modifications (e.g., warmup/decay)
+                    wandb.log(
+                        {
+                            "VLA Train/Learning Rate": scheduler.get_last_lr()[0],
+                        },
+                        step=log_step,
+                    )
 
                 # Optimizer and LR scheduler step
                 if (batch_idx + 1) % cfg.grad_accumulation_steps == 0:

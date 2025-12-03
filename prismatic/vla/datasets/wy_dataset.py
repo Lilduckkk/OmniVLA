@@ -18,7 +18,7 @@ from prismatic.vla.action_tokenizer import ActionTokenizer
 from transformers import PreTrainedTokenizerBase
 from prismatic.models.backbones.vision import ImageTransform
 
-class WY_Dataset(Dataset):
+class Navitrace_Dataset(Dataset):
     def __init__(
         self,
         action_tokenizer: PreTrainedTokenizerBase,
@@ -52,7 +52,7 @@ class WY_Dataset(Dataset):
         if not arrow_files:
             raise FileNotFoundError(f"No .arrow files found in {split_dir}")
             
-        print(f"Loading raw arrow files from {split_dir}...")
+        # print(f"Loading raw arrow files from {split_dir}...")
         
         # 2. 加载数据集
         self.dataset = load_dataset("arrow", data_files=arrow_files, split="train")
@@ -66,7 +66,7 @@ class WY_Dataset(Dataset):
         all_embodiments = self.dataset['embodiments']
         all_ground_truths = self.dataset['ground_truth']
         
-        print("Building index map and filtering invalid trajectories...")
+        # print("Building index map and filtering invalid trajectories...")
         skipped_count = 0
 
         # 使用 zip 同时遍历，避免在循环中反复查询 dataset
@@ -90,9 +90,9 @@ class WY_Dataset(Dataset):
                     skipped_count += 1
                 # --- 关键修复结束 ---
 
-        print(f"Original samples: {len(self.dataset)}")
-        print(f"Skipped invalid/empty trajectories: {skipped_count}")
-        print(f"Final Expanded samples: {len(self.index_map)} (Valid trajectories only)")
+        # print(f"Original samples: {len(self.dataset)}")
+        # print(f"Skipped invalid/empty trajectories: {skipped_count}")
+        print(f"Final Expanded samples: {len(self.index_map)}")
     
     def calculate_relative_position(self, x_a, y_a, x_b, y_b):
         return x_b - x_a, y_b - y_a
@@ -123,6 +123,7 @@ class WY_Dataset(Dataset):
             current_image_PIL = image
             goal_image_PIL = image
             ground_truth = sample['ground_truth']
+            # print(f"ground: {ground_truth}")
             # metadata = sample['metadata']
 
             # 3. 生成针对【当前机器人】的任务描述
@@ -160,20 +161,22 @@ class WY_Dataset(Dataset):
                         original_normalized_traj = original_normalized_traj[:MAX_TRAJECTORY_LENGTH, :]
 
                     elif current_length < MAX_TRAJECTORY_LENGTH:
-                        # 补零
+                        # 不足20步：用最后一个点填充（保持轨迹连续性）
                         num_pad = MAX_TRAJECTORY_LENGTH - current_length
-                        # 创建一个用 0 填充的 (num_pad, 4) 矩阵
-                        padding = np.zeros((num_pad, 4), dtype=original_normalized_traj.dtype)
+                        last_point = original_normalized_traj[-1]  # 取最后一个有效点（4维）
+                        padding = np.tile(last_point, (num_pad, 1))  # 重复num_pad次，生成填充数据
                         original_normalized_traj = np.vstack([original_normalized_traj, padding])
 
                     # === [新增逻辑结束] ===
                     # 将路径长度固定为8步
                     if len(raw_traj) < self.len_traj_pred:
+                        # 不足8步：用最后一步的坐标重复填充（保持轨迹趋势，比补零更合理）
                         num_pad = self.len_traj_pred - len(raw_traj)
                         last_point = raw_traj[-1]
                         padding = np.tile(last_point, (num_pad, 1))
                         raw_traj = np.vstack([raw_traj, padding])
                     elif len(raw_traj) > self.len_traj_pred:
+                        # 超过8步：截断前8步
                         raw_traj = raw_traj[:self.len_traj_pred]
                         
                     # 计算 8 步的 normalized_traj (用于 actions)
@@ -258,31 +261,39 @@ class WY_Dataset(Dataset):
                 image_obs_list.append(self._resize_norm(TF.to_tensor(current_image_PIL), (96, 96)))  #In our real code, image_obs_list is list of history image. In this dummy dataset code, we feed current images. The detail implementation is same as ViNT, NoMaD code base. 
             image_obs = torch.cat(image_obs_list)     
             image_goal = self._resize_norm(TF.to_tensor(goal_image_PIL), (96, 96))
+            
 
-            # Data augmentation (random cropping)
-            voffset = int(224.0*0.2*random.random())
-            hoffset = int(224.0*0.1*random.random())            
-            PILbox = (hoffset, voffset, 224-hoffset, 224-voffset)
-            current_image_PIL = current_image_PIL.crop(PILbox).resize((224,224)) 
-            goal_image_PIL = goal_image_PIL.crop(PILbox).resize((224,224))      
+            # 这里不修改尺寸了！！！！我需要完整的image
+            # Data augmentation (random cropping) 
+            # voffset = int(224.0*0.2*random.random())
+            # hoffset = int(224.0*0.1*random.random())            
+            # PILbox = (hoffset, voffset, 224-hoffset, 224-voffset)
+            # current_image_PIL = current_image_PIL.crop(PILbox).resize((224,224)) 
+            # goal_image_PIL = goal_image_PIL.crop(PILbox).resize((224,224))   
 
-            # Data augmentation (horizontal flipping)
-            if random.random() > 0.5:
-                current_image_PIL = current_image_PIL.transpose(Image.FLIP_LEFT_RIGHT)
-                goal_image_PIL = goal_image_PIL.transpose(Image.FLIP_LEFT_RIGHT)
-                actions[:,1] = -actions[:,1]
-                actions[:,3] = -actions[:,3]
-                goal_pose_cos_sin[1] = -goal_pose_cos_sin[1]
-                goal_pose_cos_sin[3] = -goal_pose_cos_sin[3]  
+            # 可以不修改形状，保留原始的形状方便可视化
+            current_image_PIL = current_image_PIL.resize((1000, 1000))  # 直接修改为224×224
+            goal_image_PIL = goal_image_PIL.resize((1000, 1000))        # 目标图同步处理 
+            
+            
+            # 我们这里的数据暂时不需要翻转！！！！！！！！！！否则会出问题
+            # Data augmentation (horizontal flipping) 
+            # if random.random() > 0.5:
+            #     current_image_PIL = current_image_PIL.transpose(Image.FLIP_LEFT_RIGHT)
+            #     goal_image_PIL = goal_image_PIL.transpose(Image.FLIP_LEFT_RIGHT)
+            #     actions[:,1] = -actions[:,1]
+            #     actions[:,3] = -actions[:,3]
+            #     goal_pose_cos_sin[1] = -goal_pose_cos_sin[1]
+            #     goal_pose_cos_sin[3] = -goal_pose_cos_sin[3]  
                 
-                image_obs = torch.flip(image_obs, dims=[2])
-                image_goal = torch.flip(image_goal, dims=[2])  
+            #     image_obs = torch.flip(image_obs, dims=[2])
+            #     image_goal = torch.flip(image_goal, dims=[2])  
                             
             pixel_values_current = self.image_transform(current_image_PIL)
             pixel_values_goal = self.image_transform(goal_image_PIL) 
             # pixel_values_current = self.image_transform(image)
             # pixel_values_goal = self.image_transform(image)
-
+            # print(f"pixel_values_current shape: {pixel_values_current.shape}, pixel_values_goal shape: {pixel_values_goal.shape}")
             #action select 1.0: raw action, 0.0: MBRA synthetic action
             action_select_mask = torch.tensor(1.0)
 
@@ -292,7 +303,8 @@ class WY_Dataset(Dataset):
                 "task": sample['task'],
                 "embodiments": sample['embodiments'],
                 "image": sample['image'],
-                "segmentation_mask": sample['segmentation_mask'],
+                # "segmentation_mask": sample['segmentation_mask'],
+                "segmentation_mask": torch.as_tensor(sample['segmentation_mask']),
                 "ground_truth": sample['ground_truth'],
                 "category": sample['category'],
                 "context": sample['context'],
