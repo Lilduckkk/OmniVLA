@@ -137,7 +137,7 @@ class OmniVLAConfig:
     num_steps_before_decay: int = 100_000            # Number of steps before LR decays by 10x
     grad_accumulation_steps: int = 1                 # Number of gradient accumulation steps
     max_steps: int = 200_000                         # Max number of training steps
-    max_steps: int = 20                              # 减小一点便于测试
+    max_steps: int = 100                              # 减小一点便于测试
     save_freq: int = 100                              # Checkpoint saving frequency in steps    
     save_latest_checkpoint_only: bool = False        # If True, saves only 1 checkpoint, overwriting latest checkpoint
                                                      # (If False, saves all checkpoints)
@@ -320,13 +320,20 @@ def run_forward_pass(
         # Setting supervised action command.
         # Removed MBRA mixing. Using ground truth actions as reference.
         action_ref = ground_truth_actions
-        origin_trajectory_ref = batch['original_normalized_trajectory']
-        traj_cost = TrajCost()
-        cost = traj_cost.CostofTraj(origin_trajectory_ref, predicted_actions)
+        # origin_trajectory_ref = batch['original_normalized_trajectory']
+        traj_cost = TrajCost(batch)
+        cost_traj = traj_cost.CostofTraj( predicted_actions)
+        cost_mask = traj_cost.CostofSegMask( predicted_actions)
 
         limited_temp_dist = torch.clip(batch["temp_dist"], min=0.0, max=20.0) 
         lan_bool = (batch["goal_mask_select"] == 7)|(batch["goal_mask_select"] == 8) #object loss is only for the LeLaN dataset
-        loss = 1.0*torch.nn.MSELoss()(action_ref, predicted_actions) + 0.1*torch.nn.MSELoss()(obj_pose_norm[lan_bool], predicted_actions[:,-1,0:2][lan_bool]) + 0.1*torch.nn.MSELoss()(predicted_actions[:,0:-1], predicted_actions[:,1:])            
+        # 统一设置lan_bool为False，避免报错
+        # lan_bool = torch.zeros_like(lan_bool, dtype=torch.bool)
+        # print(f"obj_pose_norm:{obj_pose_norm} ")
+        # print(f"lan_bool:{lan_bool} ")
+        loss = 1.0*torch.nn.MSELoss()(action_ref, predicted_actions) + 0.1*torch.nn.MSELoss()(obj_pose_norm[lan_bool], predicted_actions[:,-1,0:2][lan_bool]) + 0.1*torch.nn.MSELoss()(predicted_actions[:,0:-1], predicted_actions[:,1:]) 
+        loss = 1*torch.nn.MSELoss()(obj_pose_norm[lan_bool], predicted_actions[:,-1,0:2][lan_bool]) + 1*torch.nn.MSELoss()(predicted_actions[:,0:-1], predicted_actions[:,1:])            
+        print(f"loss:{loss} ")   
         L2_action = torch.nn.MSELoss()(action_ref, predicted_actions)
         L2_obj = torch.nn.MSELoss()(obj_pose_norm[lan_bool], predicted_actions[:,-1,0:2][lan_bool])
         L2_smooth = torch.nn.MSELoss()(predicted_actions[:,0:-1], predicted_actions[:,1:])
@@ -740,7 +747,7 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
 
     # Initialize wandb logging
     if distributed_state.is_main_process:
-        wandb.init(entity=cfg.wandb_entity, project=cfg.wandb_project, name=f"ft+{run_id}")
+        wandb.init(entity=cfg.wandb_entity, project=cfg.wandb_project, name=f"ft+{run_id}+{time.strftime('%Y%m%d-%H%M%S')}")
 
     # MBRA loading removed.
 
@@ -1043,7 +1050,8 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                 # print("Log Step:", log_step)
                 smoothened_metrics = compute_smoothened_metrics(recent_metrics)
                 if distributed_state.is_main_process and log_step % cfg.wandb_log_freq == 0:
-                    log_metrics_to_wandb(smoothened_metrics, "VLA Train", log_step, wandb)
+                    log_metrics_to_wandb(smoothened_metrics, "VLA Train", log_step, wandb)                
+
                 # [If applicable] Linearly warm up learning rate from 10% to 100% of original
                 if cfg.lr_warmup_steps > 0:
                     lr_progress = min((gradient_step_idx + 1) / cfg.lr_warmup_steps, 1.0)  # Cap at 1.0
@@ -1060,7 +1068,7 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                         },
                         step=log_step,
                     )
-
+                
                 # Optimizer and LR scheduler step
                 if (batch_idx + 1) % cfg.grad_accumulation_steps == 0:
                     optimizer.step()

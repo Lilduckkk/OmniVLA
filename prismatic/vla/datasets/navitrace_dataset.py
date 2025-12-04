@@ -10,6 +10,7 @@ from typing import Tuple, Type, Dict
 import math
 import utm
 import torchvision.transforms.functional as TF
+import cv2
 
 # OpenVLA/Prismatic 依赖
 from prismatic.vla.constants import IGNORE_INDEX
@@ -43,6 +44,7 @@ class Navitrace_Dataset(Dataset):
         self.predict_stop_token = predict_stop_token
         self.image_transform = image_transform
         self.len_traj_pred = len_traj_pred  # 保存轨迹长度用于生成 mask
+        self.MAX_TRAJECTORY_LENGTH = 20 # 统一轨迹长度为20
         # 1. 定位 .arrow 文件
         split_dir = os.path.join(self.data_root_dir, self.data_split_type)
         if not os.path.exists(split_dir):
@@ -134,6 +136,7 @@ class Navitrace_Dataset(Dataset):
             
             # 初始化为空，但在 __init__ 过滤后，这里理论上一定会有数据
             normalized_traj = np.zeros((1, 4), dtype=np.float64) 
+            original_normalized_traj_20 = np.zeros((self.MAX_TRAJECTORY_LENGTH, 4), dtype=np.float64)
 
             # 直接获取数据，因为我们在 __init__ 里保证了它存在且不为空
             if target_embodiment in ground_truth:
@@ -152,21 +155,22 @@ class Navitrace_Dataset(Dataset):
                     else:
                         # 如果维度不对，创建一个占位符
                         original_normalized_traj = np.zeros((len(raw_traj) if raw_traj.ndim >= 2 else 1, 4), dtype=np.float64)
+                        
                     # === [新增逻辑] 规定 original_normalized_traj 为 20 个点 ===
-                    MAX_TRAJECTORY_LENGTH = 20
                     current_length = original_normalized_traj.shape[0]
-
-                    if current_length > MAX_TRAJECTORY_LENGTH:
+                    if current_length > self.MAX_TRAJECTORY_LENGTH:
                         # 截断
-                        original_normalized_traj = original_normalized_traj[:MAX_TRAJECTORY_LENGTH, :]
+                        original_normalized_traj_20 = original_normalized_traj[:self.MAX_TRAJECTORY_LENGTH, :]
 
-                    elif current_length < MAX_TRAJECTORY_LENGTH:
+                    elif current_length < self.MAX_TRAJECTORY_LENGTH:
                         # 不足20步：用最后一个点填充（保持轨迹连续性）
-                        num_pad = MAX_TRAJECTORY_LENGTH - current_length
+                        num_pad = self.MAX_TRAJECTORY_LENGTH - current_length
                         last_point = original_normalized_traj[-1]  # 取最后一个有效点（4维）
                         padding = np.tile(last_point, (num_pad, 1))  # 重复num_pad次，生成填充数据
-                        original_normalized_traj = np.vstack([original_normalized_traj, padding])
+                        original_normalized_traj_20 = np.vstack([original_normalized_traj, padding])
 
+                    else:
+                        original_normalized_traj_20 = original_normalized_traj
                     # === [新增逻辑结束] ===
                     # 将路径长度固定为8步
                     if len(raw_traj) < self.len_traj_pred:
@@ -198,32 +202,53 @@ class Navitrace_Dataset(Dataset):
             inst_obj = embod_task
             actions = normalized_traj
 
-            # 虚拟导航目标逻辑 (保持不变)
-            current_lat, current_lon, current_compass = 37.87371258374039, -122.26729417226024, 270.0
-            cur_utm = utm.from_latlon(current_lat, current_lon)
-            cur_compass = -float(current_compass) / 180.0 * math.pi
+            # # 虚拟导航目标逻辑 (保持不变)
+            # current_lat, current_lon, current_compass = 37.87371258374039, -122.26729417226024, 270.0
+            # cur_utm = utm.from_latlon(current_lat, current_lon)
+            # cur_compass = -float(current_compass) / 180.0 * math.pi
             
-            goal_lat, goal_lon, goal_compass = 37.8738930785863, -122.26746181032362, 0.0
-            goal_utm = utm.from_latlon(goal_lat, goal_lon)
-            goal_compass = -float(goal_compass) / 180.0 * math.pi
+            # goal_lat, goal_lon, goal_compass = 37.8738930785863, -122.26746181032362, 0.0
+            # goal_utm = utm.from_latlon(goal_lat, goal_lon)
+            # goal_compass = -float(goal_compass) / 180.0 * math.pi
             
-            delta_x, delta_y = self.calculate_relative_position(
-                cur_utm[0], cur_utm[1], goal_utm[0], goal_utm[1]
+            # delta_x, delta_y = self.calculate_relative_position(
+            #     cur_utm[0], cur_utm[1], goal_utm[0], goal_utm[1]
+            # )
+            # relative_x, relative_y = self.rotate_to_local_frame(delta_x, delta_y, cur_compass)
+            # radius = np.sqrt(relative_x**2 + relative_y**2)
+            # if radius > thres_dist:
+            #     relative_x *= thres_dist / radius
+            #     relative_y *= thres_dist / radius
+            # goal_pose_loc_norm = np.array([
+            #     relative_y / metric_waypoint_spacing,
+            #     -relative_x / metric_waypoint_spacing,
+            #     np.cos(goal_compass - cur_compass),
+            #     np.sin(goal_compass - cur_compass)
+            # ])        
+
+            # goal_pose_cos_sin = goal_pose_loc_norm 
+            # print(" original_normalized_traj:", original_normalized_traj)
+            current_x, current_y, current_compass = 0.5, 0.95, 0.0
+            # 逆时针为正
+            goal_compass = np.arctan2(
+                original_normalized_traj[-1, 1] - original_normalized_traj[-2, 1],  # Delta Y (垂直位移)
+                original_normalized_traj[-1, 0] - original_normalized_traj[-2, 0]   # Delta X (水平位移)
             )
-            relative_x, relative_y = self.rotate_to_local_frame(delta_x, delta_y, cur_compass)
-            radius = np.sqrt(relative_x**2 + relative_y**2)
-            if radius > thres_dist:
-                relative_x *= thres_dist / radius
-                relative_y *= thres_dist / radius
+            goal_x, goal_y, goal_compass = original_normalized_traj[-1,0], original_normalized_traj[-1,1], goal_compass
+            delta_x, delta_y = self.calculate_relative_position(
+                current_x, current_y, goal_x, goal_y
+            )     
+            # print(" delta_x:", delta_x, " delta_y:", delta_y)
+            relative_x, relative_y = self.rotate_to_local_frame(delta_x, delta_y, current_compass)    
+            # print(" relative_x:", relative_x, " relative_y:", relative_y)   
             goal_pose_loc_norm = np.array([
-                relative_y / metric_waypoint_spacing,
-                -relative_x / metric_waypoint_spacing,
-                np.cos(goal_compass - cur_compass),
-                np.sin(goal_compass - cur_compass)
-            ])        
-
-            goal_pose_cos_sin = goal_pose_loc_norm 
-
+                relative_x ,
+                relative_y,
+                np.cos(goal_compass - current_compass),
+                np.sin(goal_compass - current_compass)
+            ])             
+            goal_pose_cos_sin = goal_pose_loc_norm
+            # print(" goal_pose_cos_sin:", goal_pose_cos_sin)
             # 构建对话 Prompt
             IGNORE_INDEX = -100
             
@@ -297,21 +322,30 @@ class Navitrace_Dataset(Dataset):
             #action select 1.0: raw action, 0.0: MBRA synthetic action
             action_select_mask = torch.tensor(1.0)
 
+            # 保持segmentation_mask形状一致
+            segmentation_mask = sample['segmentation_mask']
+            segmentation_mask = np.array(segmentation_mask, dtype=np.uint8)
+            target_size = (1000, 1000)
+            resized_mask_cv2 = cv2.resize(
+                segmentation_mask,
+                target_size,  # 保持与图像一致的大小
+                interpolation=cv2.INTER_NEAREST
+            )
+            # print(f"resized_mask_cv2 shape: {resized_mask_cv2.shape}, dtype: {resized_mask_cv2.dtype}")
 
             return {
                 "sample_id": sample['sample_id'],
                 "task": sample['task'],
                 "embodiments": sample['embodiments'],
                 "image": sample['image'],
-                # "segmentation_mask": sample['segmentation_mask'],
-                "segmentation_mask": torch.as_tensor(sample['segmentation_mask']),
+                "segmentation_mask": torch.as_tensor(resized_mask_cv2),
                 "ground_truth": sample['ground_truth'],
                 "category": sample['category'],
                 "context": sample['context'],
                 "metadata": sample['metadata'],
                 "embod_task": embod_task,
                 "normalized_trajectory": normalized_traj,
-                "original_normalized_trajectory": torch.as_tensor(original_normalized_traj),
+                "original_normalized_trajectory": torch.as_tensor(original_normalized_traj_20),
 
                 "pixel_values": pixel_values_current, # 建议加上这个键，很多模型默认读取这个
                 "pixel_values_goal": pixel_values_goal,
