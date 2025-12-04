@@ -104,9 +104,10 @@ from prismatic.vla.action_tokenizer import ActionTokenizer
 from prismatic.vla.constants import ACTION_DIM, NUM_ACTIONS_CHUNK, POSE_DIM, IGNORE_INDEX
 from prismatic.vla.datasets import RLDSBatchTransform, RLDSDataset
 from prismatic.vla.datasets.dummy_dataset import Dummy_Dataset
-from OmniVLA.prismatic.vla.datasets.navitrace_dataset import Navitrace_Dataset
+from prismatic.vla.datasets.navitrace_dataset import Navitrace_Dataset
 from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
 
+from traj_cost import TrajCost
 # ==============================
 # Transform Definition
 # ==============================
@@ -319,7 +320,10 @@ def run_forward_pass(
         # Setting supervised action command.
         # Removed MBRA mixing. Using ground truth actions as reference.
         action_ref = ground_truth_actions
-        
+        origin_trajectory_ref = batch['original_normalized_trajectory']
+        traj_cost = TrajCost()
+        cost = traj_cost.CostofTraj(origin_trajectory_ref, predicted_actions)
+
         limited_temp_dist = torch.clip(batch["temp_dist"], min=0.0, max=20.0) 
         lan_bool = (batch["goal_mask_select"] == 7)|(batch["goal_mask_select"] == 8) #object loss is only for the LeLaN dataset
         loss = 1.0*torch.nn.MSELoss()(action_ref, predicted_actions) + 0.1*torch.nn.MSELoss()(obj_pose_norm[lan_bool], predicted_actions[:,-1,0:2][lan_bool]) + 0.1*torch.nn.MSELoss()(predicted_actions[:,0:-1], predicted_actions[:,1:])            

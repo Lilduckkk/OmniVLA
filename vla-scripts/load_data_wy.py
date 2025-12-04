@@ -1,12 +1,10 @@
 import sys
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"    # 关闭 TF 的 INFO / WARNING
-os.environ["XLA_FLAGS"] = "--xla_gpu_cuda_data_dir="   # 避免重复注册警告
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"    # 不用 oneDNN（可避免一些警告）
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 import warnings
-warnings.filterwarnings("ignore", category=UserWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=Warning)
+warnings.filterwarnings("ignore")
 import numpy as np
 from transformers import AutoProcessor
 from prismatic.models.backbones.llm.prompting import PurePromptBuilder
@@ -14,7 +12,7 @@ from prismatic.vla.action_tokenizer import ActionTokenizer
 
 # 尝试导入你刚才保存的简化版 Dataset
 try:
-    from OmniVLA.prismatic.vla.datasets.navitrace_dataset import Navitrace_Dataset
+    from prismatic.vla.datasets.navitrace_dataset import Navitrace_Dataset
     print("✅ 成功导入 NaviTrace_Dataset")
 except ImportError:
     print("❌ 错误: 无法导入 NaviTrace_Dataset。请确保 navitrace_new_dataset.py 在当前目录下。")
