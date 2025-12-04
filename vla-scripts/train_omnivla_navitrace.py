@@ -104,7 +104,7 @@ from prismatic.vla.action_tokenizer import ActionTokenizer
 from prismatic.vla.constants import ACTION_DIM, NUM_ACTIONS_CHUNK, POSE_DIM, IGNORE_INDEX
 from prismatic.vla.datasets import RLDSBatchTransform, RLDSDataset
 from prismatic.vla.datasets.dummy_dataset import Dummy_Dataset
-from prismatic.vla.datasets.wy_dataset import Navitrace_Dataset
+from OmniVLA.prismatic.vla.datasets.navitrace_dataset import Navitrace_Dataset
 from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
 
 # ==============================

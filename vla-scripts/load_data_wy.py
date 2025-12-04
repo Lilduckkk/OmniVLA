@@ -14,7 +14,7 @@ from prismatic.vla.action_tokenizer import ActionTokenizer
 
 # 尝试导入你刚才保存的简化版 Dataset
 try:
-    from prismatic.vla.datasets.wy_dataset import WY_Dataset
+    from OmniVLA.prismatic.vla.datasets.navitrace_dataset import Navitrace_Dataset
     print("✅ 成功导入 NaviTrace_Dataset")
 except ImportError:
     print("❌ 错误: 无法导入 NaviTrace_Dataset。请确保 navitrace_new_dataset.py 在当前目录下。")
@@ -57,7 +57,7 @@ def main():
     # 1. 实例化 Dataset
     # 因为我们现在的 Dataset 只是为了看数据，不需要真的 Tokenizer，全传 None 即可
     try:
-        dataset = WY_Dataset(
+        dataset = Navitrace_Dataset(
             action_tokenizer=action_tokenizer,
             base_tokenizer=base_tokenizer, 
             image_transform=image_transform,
