@@ -39,9 +39,9 @@ POSE_DIM = constants["POSE_DIM"]
 ACTION_PROPRIO_NORMALIZATION_TYPE = constants["ACTION_PROPRIO_NORMALIZATION_TYPE"]
 
 # Print which robot platform constants are being used (for debugging)
-print(f"Using OmniVLA constants:")
-print(f"  NUM_ACTIONS_CHUNK = {NUM_ACTIONS_CHUNK}")
-print(f"  ACTION_DIM = {ACTION_DIM}")
-print(f"  POSE_DIM = {POSE_DIM}")
-print(f"  ACTION_PROPRIO_NORMALIZATION_TYPE = {ACTION_PROPRIO_NORMALIZATION_TYPE}")
-print("If needed, manually set the correct constants in `prismatic/vla/constants.py`!")
+# print(f"Using OmniVLA constants:")
+# print(f"  NUM_ACTIONS_CHUNK = {NUM_ACTIONS_CHUNK}")
+# print(f"  ACTION_DIM = {ACTION_DIM}")
+# print(f"  POSE_DIM = {POSE_DIM}")
+# print(f"  ACTION_PROPRIO_NORMALIZATION_TYPE = {ACTION_PROPRIO_NORMALIZATION_TYPE}")
+# print("If needed, manually set the correct constants in `prismatic/vla/constants.py`!")

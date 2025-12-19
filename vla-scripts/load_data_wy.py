@@ -81,11 +81,22 @@ def main():
     # 先查看所有的字段
     # print(f"样本字段: {list(sample.keys())}")
     # # 3. 逐个字段打印详情,不要输出'image', 'segmentation_mask'等大数据，输出的简洁一点
-    # for key, value in sample.items():
-    #     if key in ['image', 'segmentation_mask']:
-    #         print(f"- Key: '{key}' (Type: {type(value).__name__}, skipped detailed print)")
-    #     else:
-    #         print(f"- Key: '{key}' - Value Preview: {value}")
+    for key, value in sample.items():
+        # if key in ['image', 'segmentation_mask']:
+        #     print(f"- Key: '{key}' (Type: {type(value).__name__}, skipped detailed print)")
+        if key == 'task':
+            print(f"task: {value}")
+        # else:
+        #     print(f"- Key: '{key}' - Value Preview: {value}")
+
+    for i in range(len(dataset)):
+        sample = dataset[i]
+        # 先查看所有的字段
+        # print(f"样本字段: {list(sample.keys())}")
+        for key, value in sample.items():
+
+            if key == 'task':
+                print(f"task: {value}")
 
 if __name__ == "__main__":
     main()

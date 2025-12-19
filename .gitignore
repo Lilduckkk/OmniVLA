@@ -23,7 +23,7 @@ runs/
 **/__pycache__/
 # Ignore all wandb directories everywhere
 **/wandb/
-transformers-openvla-oft
+transformers-openvla-oft/
 # 添加Omnivla/test/qkv_language_only
 OmniVLA/test/qkv_language_only/
 *.npy
@@ -36,3 +36,10 @@ vla-scripts/load_data.py
 vla-scripts/train_omnivla_wy.py
 
 *.arrow
+
+navitrace_evaluation/
+
+*.tsv
+omnivla-finetuned-cast--218000_chkpt/
+omnivla-finetuned-cast--219000_chkpt/
+219000/

@@ -7,7 +7,7 @@ Train or finetune OmniVLA with LoRA.
 # ==============================
 # Configuration Flags
 # ==============================
-TRAIN_MODE = True   # True: training mode, False: debug mode (minimize GPU RAM usage)
+TRAIN_MODE = False   # True: training mode, False: debug mode (minimize GPU RAM usage)
 VISUALIZE = True    # True: save visualization images of policy performance
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -104,7 +104,7 @@ from prismatic.vla.action_tokenizer import ActionTokenizer
 from prismatic.vla.constants import ACTION_DIM, NUM_ACTIONS_CHUNK, POSE_DIM, IGNORE_INDEX
 from prismatic.vla.datasets import RLDSBatchTransform, RLDSDataset
 # from prismatic.vla.datasets.dummy_dataset import Dummy_Dataset
-from prismatic.vla.datasets.navitrace_dataset import Navitrace_Dataset
+from prismatic.vla.datasets.vamos_dataset import Vamos_Dataset
 from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
 
 from traj_cost import TrajCost
@@ -137,7 +137,7 @@ class OmniVLAConfig:
     num_steps_before_decay: int = 100_000            # Number of steps before LR decays by 10x
     grad_accumulation_steps: int = 1                 # Number of gradient accumulation steps
     max_steps: int = 200_000                         # Max number of training steps
-    max_steps: int = 500                              # 减小一点便于测试
+    max_steps: int = 100                              # 减小一点便于测试
     save_freq: int = 1000                            # Checkpoint saving frequency in steps    
     save_latest_checkpoint_only: bool = False        # If True, saves only 1 checkpoint, overwriting latest checkpoint
                                                      # (If False, saves all checkpoints)
@@ -161,7 +161,7 @@ class OmniVLAConfig:
     wandb_log_freq: int = 10                         # Logging frequency in steps (renamed from wandb_log_freq)
 
     # Dataset
-    dataset_root: str = "data/data_splits/navitrace_dataset" # Path to data root
+    dataset_root: str = "data/data_splits/vamos_dataset" # Path to data root
 def remove_ddp_in_checkpoint(state_dict) -> dict:
     new_state_dict = {}
     for k, v in state_dict.items():
@@ -324,8 +324,8 @@ def run_forward_pass(
         action_ref = batch["actions"].to(device_id).to(torch.bfloat16)
         # origin_trajectory_ref = batch['original_normalized_trajectory']
         traj_cost = TrajCost(batch)
-        cost_traj = traj_cost.CostofTraj(predicted_actions)
-        cost_mask = traj_cost.CostofSegMask(predicted_actions)
+        cost_traj = traj_cost.CostofTraj( predicted_actions)
+        cost_mask = traj_cost.CostofSegMask( predicted_actions)
 
         limited_temp_dist = torch.clip(batch["temp_dist"], min=0.0, max=20.0) 
         lan_bool = (batch["goal_mask_select"] == 7)|(batch["goal_mask_select"] == 8) #object loss is only for the LeLaN dataset
@@ -927,6 +927,9 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     elif cfg.vla_path == "./omnivla-finetuned-cast": #from OmniVLA checkpoints fituned with CAST dataset 
         cfg.resume = True      
         cfg.resume_step = 210000 
+    elif cfg.vla_path == "./219000": #from OmniVLA checkpoints fituned with CAST dataset 
+        cfg.resume = True      
+        cfg.resume_step = 219000 
                                                                                           
     # Get experiment run ID
     run_id = get_run_id(cfg)
@@ -1108,12 +1111,12 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
     train_dataset_navitrace = []
     test_dataset_navitrace = []
     for data_split_type in ["train", "test"]:   
-        dataset_navitrace = Navitrace_Dataset(
+        dataset_navitrace = Vamos_Dataset(
             action_tokenizer=action_tokenizer,
             base_tokenizer=processor.tokenizer, 
             image_transform=processor.image_processor.apply_transform,
             prompt_builder_fn=PurePromptBuilder,
-            dataset_name="navitrace",
+            dataset_name="vamos",
             data_root_dir=cfg.dataset_root,
             data_split_type=data_split_type,
             predict_stop_token=True,
@@ -1175,7 +1178,7 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                  
     log_count = 0
     # for epoch in range(100):
-    for epoch in range(20):
+    for epoch in range(2):
         # 只需要设置这一个 sampler
         sampler_train_navitrace.set_epoch(epoch)
                 
@@ -1289,26 +1292,26 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                         distributed_state=distributed_state,
                     )
 
-        # ==========================================
-        # [NEW] 在 Epoch 结束时运行 Evaluation
-        # ==========================================
-        if TRAIN_MODE: # 只有在训练模式下才需要在每个 Epoch 跑测试
-            print(f"Starting evaluation for Epoch {epoch}...")
-            run_evaluation(
-                cfg=cfg,
-                vla=vla,
-                action_head=action_head,
-                pose_projector=pose_projector,
-                test_loader=test_loader_navitrace, # 使用之前定义的 test_loader
-                processor=processor,
-                action_tokenizer=action_tokenizer,
-                device_id=device_id,
-                epoch=epoch,
-                log_step=log_step, # 使用当前的 log_step 记录 wandb
-                wandb_entity=wandb,
-                distributed_state=distributed_state,
-                num_patches=NUM_PATCHES
-            )
-            print(f"Epoch {epoch} evaluation finished.")
+        # # ==========================================
+        # # [NEW] 在 Epoch 结束时运行 Evaluation
+        # # ==========================================
+        # if TRAIN_MODE: # 只有在训练模式下才需要在每个 Epoch 跑测试
+        #     print(f"Starting evaluation for Epoch {epoch}...")
+        #     run_evaluation(
+        #         cfg=cfg,
+        #         vla=vla,
+        #         action_head=action_head,
+        #         pose_projector=pose_projector,
+        #         test_loader=test_loader_navitrace, # 使用之前定义的 test_loader
+        #         processor=processor,
+        #         action_tokenizer=action_tokenizer,
+        #         device_id=device_id,
+        #         epoch=epoch,
+        #         log_step=log_step, # 使用当前的 log_step 记录 wandb
+        #         wandb_entity=wandb,
+        #         distributed_state=distributed_state,
+        #         num_patches=NUM_PATCHES
+        #     )
+        #     print(f"Epoch {epoch} evaluation finished.")
 if __name__ == "__main__":
     train_omnivla()

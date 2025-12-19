@@ -130,6 +130,23 @@ class Navitrace_Dataset(Dataset):
 
             # 3. 生成针对【当前机器人】的任务描述
             embod_task = f"Generate the trajectory for {target_embodiment} to {task}."
+            
+            # 新增了一些提示！！！！！！！！！！！！！！！！！！！！！！！
+            SYSTEM_PROMPT = """You are a navigation expert for various embodiments including robots and humans. Given an image of the current scenario, a specified embodiment (e.g., legged robot, wheeled robot, human, or bike), and a navigation task (e.g., "Go down the road"), you will predict a feasible future trajectory as a sequence of 2D points in normalized image coordinates (ranging from 0 to 1, where [0,0] is the top-left and [1,1] is the bottom-right).- The image shows a first-person view of the navigation scenario- Start your trajectory near the bottom center of the image, which corresponds approximately to normalized coordinate [0.5, 0.95] (representing the current position of the embodiment)- The trajectory should be adapted to the embodiment's abilities and limitations- Plan the path forward from this starting position based on what the embodiment can see and navigate- The trajectory should extend all the way to the goal if the path is visible. If the path is occluded, the trajectory should end where the path becomes fully obscured, unless the path can be reasonably inferred from the visible context.- If a red traffic light is visible and affects the planned path, or if crossing traffic or moving vehicles are present that make it unsafe to proceed, stop at an appropriate waiting position (e.g., just before the intersection or curb) and end the trajectory there.- All tasks that you are given have a solution- Output **only** the list of 2D points in normalized image coordinates (values between 0 and 1) in the following format: `[[x1, y1], [x2, y2], ..., [xn, yn]]`- Do not include any explanation or additional output### Embodiment Movement Characteristics- **Human**: A standard pedestrian. Can navigate stairs and ramps but cannot climb tall obstacles.- **Legged Robot**: A quadruped like ANYmal. Behaves similarly to a human, but it is shorter. It can handle stairs and escalators.- **Wheeled Robot**: A wheeled delivery robot. Behaves like a wheelchair, preferring smooth surfaces such as walkways and ramps. It cannot use stairs or escalators.- **Bicycle**: A standard cyclist. Follows traffic regulations and prefers bike lanes or streets. Cannot navigate stairs."""
+            SYSTEM_PROMPT= """You are a navigation expert for various embodiments including robots and humans."""
+
+            USER_PROMPT = """**Embodiment**: {embodiment}**Task**: {task}The image shows a first-person view from the embodiment's current position. Begin your trajectory near the bottom center of the image (around normalized coordinate [0.5, 0.95]) and predict the path forward as a list of 2D points in normalized coordinates (values from 0 to 1) according to the embodiment and the scenario shown in the image."""
+            
+            # 1. 🌟 构建完整的指令 Prompt (核心修改)
+            # 格式化 user_prompt
+            user_prompt_formatted = USER_PROMPT.format(embodiment=target_embodiment, task=task)
+            
+            # 组合完整的指令
+            full_instruction = SYSTEM_PROMPT + "\n\n" + user_prompt_formatted
+            
+            # 将完整的指令赋给 inst_obj/embod_task
+            inst_obj = full_instruction
+            embod_task = full_instruction
 
             # 4. 归一化轨迹数据
             W, H = image.size
@@ -198,7 +215,10 @@ class Navitrace_Dataset(Dataset):
                     # 如果代码跑到这里，说明 __init__ 过滤逻辑有漏网之鱼，抛出异常方便调试
                     raise ValueError(f"Unexpected empty trajectory list for {target_embodiment} at index {original_row_idx}")
             
-            modality_id = 7
+            # modality_id = 7
+            # modality_id = 8
+            # 在 7 和 8 之间随机选择
+            modality_id = random.randint(7,8)
             inst_obj = embod_task
             actions = normalized_traj
 
@@ -235,9 +255,11 @@ class Navitrace_Dataset(Dataset):
                 original_normalized_traj[-1, 0] - original_normalized_traj[-2, 0]   # Delta X (水平位移)
             )
             goal_x, goal_y, goal_compass = original_normalized_traj[-1,0], original_normalized_traj[-1,1], goal_compass
+            # print(f" goal_x:{goal_x} , goal_y:{goal_y} , goal_compass:{goal_compass} ")
             delta_x, delta_y = self.calculate_relative_position(
                 current_x, current_y, goal_x, goal_y
             )     
+            # print(f" delta_x:{delta_x} , delta_y:{delta_y} , current_compass:{current_compass} ")
             # print(" delta_x:", delta_x, " delta_y:", delta_y)
             relative_x, relative_y = self.rotate_to_local_frame(delta_x, delta_y, current_compass)    
             # print(" relative_x:", relative_x, " relative_y:", relative_y)   
@@ -249,9 +271,10 @@ class Navitrace_Dataset(Dataset):
             ])             
             goal_pose_cos_sin = goal_pose_loc_norm
             # print(" goal_pose_cos_sin:", goal_pose_cos_sin)
+
             # 构建对话 Prompt
             IGNORE_INDEX = -100
-            
+
             # 二次安全检查
             if len(actions) == 0:
                 # 如果这里报错，说明上面的归一化逻辑有问题
@@ -277,7 +300,7 @@ class Navitrace_Dataset(Dataset):
             input_ids = torch.tensor(self.base_tokenizer(prompt_builder.get_prompt(), add_special_tokens=True).input_ids)
             labels = input_ids.clone()
             labels[:-(action_chunk_len + 1)] = IGNORE_INDEX
-            if not predict_stop_token:
+            if not self.predict_stop_token:
                 labels[-1] = IGNORE_INDEX
 
             # Images for MBRA model
@@ -332,7 +355,7 @@ class Navitrace_Dataset(Dataset):
                 interpolation=cv2.INTER_NEAREST
             )
             # print(f"resized_mask_cv2 shape: {resized_mask_cv2.shape}, dtype: {resized_mask_cv2.dtype}")
-
+            
             return {
                 "sample_id": sample['sample_id'],
                 "task": sample['task'],
@@ -351,7 +374,7 @@ class Navitrace_Dataset(Dataset):
                 "pixel_values_goal": pixel_values_goal,
                 "input_ids": input_ids,
                 "labels": labels,
-                "dataset_name": "wy_dataset",
+                "dataset_name": "navitrace_dataset",
                 "modality_id": modality_id,
                 "actions": torch.as_tensor(actions),
                 "action_select_mask": action_select_mask, # 修复本次报错的关键
