@@ -95,6 +95,7 @@ class Vamos_Dataset(Dataset):
                 print(f"Error loading {path}: {e}")
         
         print(f"Total filtered samples (modality_id={self.filter_modality_id}): {len(self.sample_map)}")  # 新增：打印过滤后的样本数
+    
     def __len__(self) -> int:
         return len(self.sample_map)
 

@@ -324,8 +324,8 @@ def run_forward_pass(
         action_ref = batch["actions"].to(device_id).to(torch.bfloat16)
         # origin_trajectory_ref = batch['original_normalized_trajectory']
         traj_cost = TrajCost(batch)
-        cost_traj = traj_cost.CostofTraj( predicted_actions)
-        cost_mask = traj_cost.CostofSegMask( predicted_actions)
+        cost_traj = traj_cost.CostofTraj(predicted_actions)
+        cost_mask = traj_cost.CostofSegMask(predicted_actions)
 
         limited_temp_dist = torch.clip(batch["temp_dist"], min=0.0, max=20.0) 
         lan_bool = (batch["goal_mask_select"] == 7)|(batch["goal_mask_select"] == 8) #object loss is only for the LeLaN dataset
@@ -385,7 +385,8 @@ def run_forward_pass(
                 0,         
                 idrun,                              
                 1,                  
-                False,                               
+                False,
+                batch["lan_prompts"]                               
                 )                                        
 
     # Return both the loss tensor (with gradients) and the metrics dictionary (with detached values)
@@ -594,7 +595,8 @@ def visualize_train_new(
     epoch: int,
     count: int,
     num_images_log: int = 10,            
-    lan: bool = True,    
+    lan: bool = True,
+    task: str = "nav",    
 ):
     """Plot samples from the exploration model overlaid on the image."""
     project_folder = "./visualization"
@@ -654,6 +656,7 @@ def visualize_train_new(
         ax.legend(loc='upper right', fontsize=12)
         # 修改这里：标题改成英文
         ax.set_title(f"Sample {i}: Trajectory Overlay", fontsize=16, fontweight='bold')
+        ax.set_title(f"{task}", fontsize=16, fontweight='bold')
         ax.axis('off') # 隐藏坐标轴
 
         # --- 4. 关键修正：先保存，再引用 ---
@@ -860,6 +863,7 @@ def run_evaluation(
                     count=batch_idx, # sample 编号
                     num_images_log=vis_count,
                     lan=True, # 或者是根据 dataset 设置
+                    task=merged_batch["lan_prompts"]
                 )
                 
                 # # 读取生成的文件并添加到 WandB
