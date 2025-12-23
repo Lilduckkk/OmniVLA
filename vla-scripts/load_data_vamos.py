@@ -83,14 +83,15 @@ def main():
 
     # --- 5. 循环检查前几个样本 ---
     # 只检查前 3 个样本，避免刷屏
-    num_samples_to_check = 3
+    num_samples_to_check = 100
     print(f"\n[正在检查前 {num_samples_to_check} 个样本的数据结构]")
 
     for i in range(min(len(dataset), num_samples_to_check)):
-        print(f"\n>>> Sample Index: {i}")
+        # print(f"\n>>> Sample Index: {i}")
         try:
             sample = dataset[i]
-            print(f"modality_id: {sample['modality_id']}")
+            # print(f"modality_id: {sample['modality_id']}")
+            # print(f"len of actions: {len(sample['original_normalized_trajectory'])}")
             # 先查看所有的字段
             # print(f"样本字段: {list(sample.keys())}")
             # # 打印关键字段

@@ -21,80 +21,77 @@ import cv2
 
 class Vamos_Dataset(Dataset):
     def __init__(
-        self,
-        action_tokenizer: any, # 替换为实际类型
-        base_tokenizer: any,   # 替换为实际类型
-        image_transform: any,  # 替换为实际类型
-        prompt_builder_fn: Type[any],
-        data_root_dir: str = "data/data_splits/vamos_dataset",
-        data_split_type: str = "train",
-        image_size: Tuple[int, int] = (224, 224),
-        len_traj_pred: int = 8,
-        predict_stop_token: bool = True,
-        use_embodiment_prompt: bool = True,
-        dataset_name="vamos",
-        len_context: int = 8,
-        filter_modality_id: int = 7,  # 新增：指定要筛选的modality_id
-    ):
-        # --- 这一部分严格保留你提供的代码 ---
-        self.context_size = 5
-        self.data_root_dir = data_root_dir
-        self.data_split_type = data_split_type
-        self.action_tokenizer = action_tokenizer
-        self.base_tokenizer = base_tokenizer
-        self.prompt_builder = prompt_builder_fn
-        self.predict_stop_token = predict_stop_token
-        self.image_transform = image_transform
-        self.len_traj_pred = len_traj_pred  # 保存轨迹长度用于生成 mask
-        self.MAX_TRAJECTORY_LENGTH = 200 # 统一轨迹长度为20
-        self.filter_modality_id = filter_modality_id  # 新增：保存筛选条件
-        # --- 以下是追加的数据加载逻辑 ---
-        
-        # 拼接路径: data_root_dir/train/*.parquet
-        search_path = os.path.join(self.data_root_dir, self.data_split_type)
-        self.file_paths = sorted(glob.glob(os.path.join(search_path, "*.parquet")))
-        
-        if not self.file_paths:
-            # 兼容：如果没有子文件夹，尝试直接在 root 下找
-            search_path = self.data_root_dir
+            self,
+            action_tokenizer: any, 
+            base_tokenizer: any,   
+            image_transform: any,  
+            prompt_builder_fn: Type[any],
+            data_root_dir: str = "data/data_splits/vamos_dataset",
+            data_split_type: str = "train",
+            image_size: Tuple[int, int] = (224, 224),
+            len_traj_pred: int = 8,
+            predict_stop_token: bool = True,
+            use_embodiment_prompt: bool = True,
+            dataset_name="vamos",
+            len_context: int = 8,
+            filter_modality_id: int = 7,  
+        ):
+            self.context_size = 5
+            self.data_root_dir = data_root_dir
+            self.data_split_type = data_split_type
+            self.action_tokenizer = action_tokenizer
+            self.base_tokenizer = base_tokenizer
+            self.prompt_builder = prompt_builder_fn
+            self.predict_stop_token = predict_stop_token
+            self.image_transform = image_transform
+            self.len_traj_pred = len_traj_pred  
+            self.MAX_TRAJECTORY_LENGTH = 200 
+            self.filter_modality_id = filter_modality_id  
+            
+            # 拼接路径: data_root_dir/train/*.parquet
+            search_path = os.path.join(self.data_root_dir, self.data_split_type)
             self.file_paths = sorted(glob.glob(os.path.join(search_path, "*.parquet")))
             
-        self.data_frames = []
-        self.sample_map = [] 
+            if not self.file_paths:
+                # 兼容处理
+                search_path = self.data_root_dir
+                self.file_paths = sorted(glob.glob(os.path.join(search_path, "*.parquet")))
+                
+            self.data_frames = []
+            self.sample_map = [] 
 
-        # print(f"Loading Vamos Dataset from {search_path}...")
-        # for df_idx, path in enumerate(self.file_paths):
-        #     try:
-        #         # 读取 parquet
-        #         df = pd.read_parquet(path, engine='auto')
-        #         self.data_frames.append(df)
-        #         for row_idx in range(len(df)):
-        #             self.sample_map.append((df_idx, row_idx))
-        #     except Exception as e:
-        #         print(f"Error loading {path}: {e}")
-        
-        # print(f"Total samples: {len(self.sample_map)}")
+            print(f"Loading Vamos Dataset from {search_path}...")
+            print(f"Filtering: modality_id == {self.filter_modality_id} AND trajectory_length >= 2")
 
-        # 可以筛选modality_id的样本
-        print(f"Loading Vamos Dataset from {search_path}...")
-        print(f"Will filter samples with modality_id = {self.filter_modality_id}")  # 新增：提示筛选条件
-        for df_idx, path in enumerate(self.file_paths):
-            try:
-                # 读取 parquet
-                df = pd.read_parquet(path, engine='auto')
-                self.data_frames.append(df)
-                # 遍历每行数据，先过滤再加入sample_map
-                for row_idx in range(len(df)):
-                    # 新增：提前获取task并计算modality_id，只保留符合条件的样本
-                    sample_text = df.iloc[row_idx]['text']
-                    _, modality_id = self._process_task(sample_text)
-                    # 只保留modality_id等于目标值的样本
-                    if modality_id == self.filter_modality_id:
-                        self.sample_map.append((df_idx, row_idx))
-            except Exception as e:
-                print(f"Error loading {path}: {e}")
-        
-        print(f"Total filtered samples (modality_id={self.filter_modality_id}): {len(self.sample_map)}")  # 新增：打印过滤后的样本数
+            for df_idx, path in enumerate(self.file_paths):
+                try:
+                    # 读取 parquet
+                    df = pd.read_parquet(path, engine='auto')
+                    self.data_frames.append(df)
+                    
+                    # 遍历每行数据进行预筛选
+                    for row_idx in range(len(df)):
+                        sample_row = df.iloc[row_idx]
+                        
+                        # 1. 筛选 modality_id
+                        sample_text = sample_row['text']
+                        _, modality_id = self._process_task(sample_text)
+                        
+                        # 2. 检查轨迹长度 (针对索引 -2 报错的关键修复)
+                        # 假设字段名为 'shorter_trajectory_2d'
+                        ground_truth = sample_row['shorter_trajectory_2d']
+                        
+                        # 只有同时满足 modality 条件且轨迹点数 >= 2 的样本才会被加入
+                        if modality_id == self.filter_modality_id:
+                            if ground_truth is not None and len(ground_truth) >= 2:
+                                self.sample_map.append((df_idx, row_idx))
+                            # else:
+                            #     print(f"Skipping sample at {path} index {row_idx} due to short trajectory (len={len(ground_truth) if ground_truth is not None else 0})")
+                                
+                except Exception as e:
+                    print(f"Error loading {path}: {e}")
+            
+            print(f"Total filtered samples: {len(self.sample_map)}")
     
     def __len__(self) -> int:
         return len(self.sample_map)
@@ -158,7 +155,7 @@ class Vamos_Dataset(Dataset):
         current_image_PIL = image
         goal_image_PIL = image
         ground_truth = sample['shorter_trajectory_2d']
-
+        # print(f"len of ground_truth: {len(ground_truth)}")
         inst_obj = task
         embod_task = task
 

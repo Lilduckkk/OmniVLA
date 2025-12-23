@@ -656,7 +656,7 @@ def visualize_train_new(
         ax.legend(loc='upper right', fontsize=12)
         # 修改这里：标题改成英文
         ax.set_title(f"Sample {i}: Trajectory Overlay", fontsize=16, fontweight='bold')
-        ax.set_title(f"{task}", fontsize=16, fontweight='bold')
+        # ax.set_title(f"{task}", fontsize=16, fontweight='bold')
         ax.axis('off') # 隐藏坐标轴
 
         # --- 4. 关键修正：先保存，再引用 ---
@@ -1296,26 +1296,26 @@ def train_omnivla(cfg: OmniVLAConfig) -> None:
                         distributed_state=distributed_state,
                     )
 
-        # # ==========================================
-        # # [NEW] 在 Epoch 结束时运行 Evaluation
-        # # ==========================================
+        # ==========================================
+        # [NEW] 在 Epoch 结束时运行 Evaluation
+        # ==========================================
         # if TRAIN_MODE: # 只有在训练模式下才需要在每个 Epoch 跑测试
-        #     print(f"Starting evaluation for Epoch {epoch}...")
-        #     run_evaluation(
-        #         cfg=cfg,
-        #         vla=vla,
-        #         action_head=action_head,
-        #         pose_projector=pose_projector,
-        #         test_loader=test_loader_navitrace, # 使用之前定义的 test_loader
-        #         processor=processor,
-        #         action_tokenizer=action_tokenizer,
-        #         device_id=device_id,
-        #         epoch=epoch,
-        #         log_step=log_step, # 使用当前的 log_step 记录 wandb
-        #         wandb_entity=wandb,
-        #         distributed_state=distributed_state,
-        #         num_patches=NUM_PATCHES
-        #     )
-        #     print(f"Epoch {epoch} evaluation finished.")
+        print(f"Starting evaluation for Epoch {epoch}...")
+        run_evaluation(
+            cfg=cfg,
+            vla=vla,
+            action_head=action_head,
+            pose_projector=pose_projector,
+            test_loader=test_loader_navitrace, # 使用之前定义的 test_loader
+            processor=processor,
+            action_tokenizer=action_tokenizer,
+            device_id=device_id,
+            epoch=epoch,
+            log_step=log_step, # 使用当前的 log_step 记录 wandb
+            wandb_entity=wandb,
+            distributed_state=distributed_state,
+            num_patches=NUM_PATCHES
+        )
+        print(f"Epoch {epoch} evaluation finished.")
 if __name__ == "__main__":
     train_omnivla()

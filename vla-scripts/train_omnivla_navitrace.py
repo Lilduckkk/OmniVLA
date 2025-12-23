@@ -7,8 +7,8 @@ Train or finetune OmniVLA with LoRA.
 # ==============================
 # Configuration Flags
 # ==============================
-TRAIN_MODE = True   # True: training mode, False: debug mode (minimize GPU RAM usage)
-VISUALIZE = True    # True: save visualization images of policy performance
+TRAIN_MODE = False   # True: training mode, False: debug mode (minimize GPU RAM usage)
+VISUALIZE = False    # True: save visualization images of policy performance
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
